@@ -93,8 +93,53 @@ func (r *RabbitMQ) ConsumeDirect() {
 	}()
 	log.Printf("[*] Waiting for messasges, to exit press Ctrl+^C")
 	<- forever
-
-
 }
 
 
+//Instantiate Fanout Exchange Mode (Pub/Sub)
+func NewRabbitMQPubSub(exchangeName string) *RabbitMQ {
+	rabbitmq := NewRabbitMQ("", exchangeName, "") //"" equals default setting
+	//Build Connection with RabbitMQ
+	var err error
+	rabbitmq.conn,err = amqp.Dial(rabbitmq.Mqurl)
+	rabbitmq.failOnError(err, "New connection failed!")
+	rabbitmq.channel,err = rabbitmq.conn.Channel()
+	rabbitmq.failOnError(err, "Obtain channel failed!")
+	return rabbitmq
+}
+
+//PubSub Exchange Mode (Fannout)
+func (r *RabbitMQ) PublishPub(message string) {
+	err := r.channel.ExchangeDeclare(r.Exchange, "fanout", true, false, false, false, nil)
+
+	r.failOnError(err, "P/S Exchange declare failed")
+
+	err = r.channel.Publish(r.Exchange, "", false, false, amqp.Publishing{
+			ContentType: "text/plain",
+			Body:        []byte(message),
+		})
+}
+
+//Sub-Consume
+func (r *RabbitMQ) RecieveSub() {
+	err := r.channel.ExchangeDeclare(r.Exchange, "fanout", true, false, false, false, nil)
+	r.failOnError(err, "P/S Exchange declare failed")
+
+	q, err := r.channel.QueueDeclare("", false, false, true, false, nil)
+	r.failOnError(err, "Failed to declare a queue")
+
+	err = r.channel.QueueBind(q.Name, "", r.Exchange, false, nil)
+
+	messges, err := r.channel.Consume(q.Name, "", true, false, false, false, nil)
+
+	forever := make(chan bool)
+
+	go func() {
+		for d := range messges {
+			log.Printf("Received a message: %s", d.Body)
+		}
+	}()
+
+	fmt.Println("[*] Waiting for messasges, to exit press Ctrl+^C")
+	<-forever
+}
